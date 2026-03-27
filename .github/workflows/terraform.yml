@@ -1,0 +1,77 @@
+name: Terraform Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Select action to perform"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - apply
+          - destroy
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event.inputs.action }}
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: terraform
+
+      - name: Terraform Plan
+        if: github.event.inputs.action == 'apply'
+        run: terraform plan
+        working-directory: terraform
+
+      - name: Terraform Apply
+        if: github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve
+        working-directory: terraform
+
+      - name: Configure kubectl
+        if: github.event.inputs.action == 'apply'
+        run: |
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name migration-eks-cluster
+
+      - name: Install Helm
+        if: github.event.inputs.action == 'apply'
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Deploy Prometheus
+        if: github.event.inputs.action == 'apply'
+        run: |
+          chmod +x helm/prometheus.sh
+          ./helm/prometheus.sh
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          helm uninstall monitoring -n monitoring || true
+          kubectl delete namespace monitoring || true
+          terraform destroy -auto-approve
+        working-directory: terraform
