@@ -30,6 +30,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.7.0
+          terraform_wrapper: false
 
       - name: Terraform Init
         run: terraform init
@@ -55,6 +56,8 @@ jobs:
           aws eks update-kubeconfig \
             --region $AWS_REGION \
             --name migration-eks-cluster
+          echo "Testing cluster connection..."
+          kubectl get nodes
 
       - name: Install Helm
         if: github.event.inputs.action == 'apply'
@@ -65,12 +68,26 @@ jobs:
       - name: Deploy Prometheus
         if: github.event.inputs.action == 'apply'
         run: |
-          chmod +x helm/prometheus.sh
-          ./helm/prometheus.sh
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name migration-eks-cluster
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --values monitoring/prometheus-values.yaml \
+            --wait \
+            --timeout 10m
+          echo "Prometheus deployed successfully!"
+          kubectl get svc -n monitoring
 
       - name: Terraform Destroy
         if: github.event.inputs.action == 'destroy'
         run: |
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name migration-eks-cluster || true
           helm uninstall monitoring -n monitoring || true
           kubectl delete namespace monitoring || true
           terraform destroy -auto-approve
