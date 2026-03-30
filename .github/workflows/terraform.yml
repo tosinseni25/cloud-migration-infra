@@ -73,7 +73,7 @@ jobs:
             --name migration-eks-cluster
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
-          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+          kubectl get namespace monitoring || kubectl create namespace monitoring
           helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
             --namespace monitoring \
             --values monitoring/prometheus-values.yaml \
